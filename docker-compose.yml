@@ -14,6 +14,8 @@ services:
   mysql:
     image: mysql:8.0
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:3307:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_DATABASE: customer_service
@@ -28,6 +30,9 @@ services:
   milvus:
     image: milvusdb/milvus:v3.0.0
     restart: unless-stopped
+    # 映射到宿主机，供本地开发直连（本机 19530 空闲，无冲突）
+    ports:
+      - "127.0.0.1:19530:19530"
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_USE_EMBED: "true"

@@ -127,6 +127,36 @@ def get_user_id_by_token(token: str) -> str | None:
     return _client.get(_token_key(token))
 
 
+def get_username_by_user_id(user_id: str) -> str | None:
+    """按 Redis 账号里的 uuid 反查用户名。
+
+    账号记录 cs:user:<用户名> 的 value 里同时存了 user_id 和 username，
+    但没有反向索引，所以用 scan_iter 扫一遍（演示项目账号很少，可接受）。
+    用 scan_iter 而不是 KEYS：避免账号变多后阻塞 Redis 主线程。
+    """
+    for key in _client.scan_iter(match=f"{_PREFIX}:user:*", count=100):
+        data = _load_user(key)
+        if data.get("user_id") == user_id:
+            return data.get("username")
+    return None
+
+
+def _mysql_uid_key(user_id: str) -> str:
+    """登录账号(uuid) → MySQL users.id 的绑定映射 key。"""
+    return f"{_PREFIX}:mysqluid:{user_id}"
+
+
+def get_bound_mysql_user_id(user_id: str) -> int | None:
+    """读取该登录账号绑定的 MySQL users.id；没绑定过返回 None。"""
+    raw = _client.get(_mysql_uid_key(user_id))
+    return int(raw) if raw else None
+
+
+def bind_mysql_user_id(user_id: str, mysql_id: int) -> None:
+    """固化绑定关系（不设 TTL，与账号生命周期一致）。"""
+    _client.set(_mysql_uid_key(user_id), mysql_id)
+
+
 def revoke_token(token: str) -> None:
     if token:
         _client.delete(_token_key(token))

@@ -112,6 +112,10 @@
       cursor: pointer;
     }
     button:disabled { opacity: .6; cursor: not-allowed; }
+    /* 关键修正：作者样式 .user-bar{display:flex} 会盖过浏览器默认的 [hidden]{display:none}，
+       导致未登录时 user-bar 仍显示、却被全屏登录遮罩挡住（看得到点不到）。
+       这里显式声明，保证 hidden 属性真正生效。 */
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
@@ -119,6 +123,8 @@
     <span>🛒 电商智能客服 Agent</span>
     <span id="user-bar" class="user-bar" hidden>
       <span id="user-name"></span>
+      <!-- 跳转内联在 HTML 上：即使 /static/chat.js 被浏览器缓存成旧版、或脚本报错，入口依然可用 -->
+      <button id="test-buy-btn" type="button" onclick="location.href='/shop'">测试购买</button>
       <button id="logout-btn" type="button">退出</button>
     </span>
   </header>
@@ -139,6 +145,7 @@
     <input id="input" type="text" placeholder="输入你的问题，回车发送" autocomplete="off">
     <button id="send">发送</button>
   </footer>
-  <script src="/static/chat.js"></script>
+  <!-- 带版本号：静态文件更新后浏览器不会命中旧的缓存副本 -->
+  <script src="/static/chat.js?v=2"></script>
 </body>
 </html>

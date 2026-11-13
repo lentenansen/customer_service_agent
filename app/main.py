@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from app import config, metrics, store
 from app.graph import agent_graph
+from app.test_shop import router as test_shop_router
 from app.memory import (
     add_message,
     get_attempts,
@@ -43,6 +44,9 @@ logger.info("人工审核退款阈值: ¥%s | Redis: %s:%s/%s",
             config.REFUND_THRESHOLD, config.REDIS_HOST, config.REDIS_PORT, config.REDIS_DB)
 
 app = FastAPI(title="电商智能客服 Agent", version="0.4.0")
+
+# 测试购买 / 修改物流：演示用的下单与物流流转接口（含 /shop 页面）
+app.include_router(test_shop_router)
 
 
 @app.middleware("http")
@@ -300,8 +304,8 @@ async def chat(req: ChatRequest, request: Request):
     initial_messages = _to_chat_messages(history)
     initial_messages.append(HumanMessage(content=user_message))
 
-    logger.info("=== 收到消息 session=%s%s ===", session_id, "（登录用户）" if user_id else "")
-    logger.info("用户: %s | 当前连续失败次数: %s", user_message, attempts)
+    logger.info("=== 收到消息 session=%s%s ===", session_id,f"   user_id: {user_id}" if user_id else "")
+    logger.info("用户发送: %s | 当前连续失败次数: %s", user_message, attempts)
 
     # 2) 跑 LangGraph 图：route -> 专家节点 -> END
     start = time.perf_counter()
@@ -312,6 +316,7 @@ async def chat(req: ChatRequest, request: Request):
                 "trace": [],
                 "session_id": session_id,
                 "attempts": attempts,
+                "user_id": user_id,
             }
         )
     except Exception as exc:
