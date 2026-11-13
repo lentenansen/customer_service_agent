@@ -34,21 +34,3 @@ class AgentState(TypedDict, total=False):
     answer: str
     # 每个节点的执行记录（节点名 + 耗时），方便复盘整张图的走向
     trace: Annotated[list[str], operator.add]
-    # 登录用户的 Redis uuid（匿名时为空串）
-    user_id: str
-
-
-class AgentContext(TypedDict, total=False):
-    """子 Agent 的运行时上下文（create_agent 的 context_schema）。
-
-    为什么单独定义、且放在 state.py：
-    1. 它描述的是「图节点 → 子 Agent → 工具」这条链路上传递的上下文，
-       本质属于状态定义的一部分；
-    2. 放在 experts.py 里会被 tools.py 反向 import，形成循环依赖
-       （experts → tools → experts），启动时直接 ImportError。
-
-    user_id 这里是 MySQL 自增 id（int），不是 Redis 的 uuid——
-    工具做 Order.user_id 过滤时用的就是它。
-    """
-
-    user_id: int | None

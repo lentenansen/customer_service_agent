@@ -63,8 +63,8 @@ async def route_node(state: AgentState) -> dict:
         raw_order_no = None
     order_no = _normalize_order_no(raw_order_no)
 
-    logger.info(">>> 路由节点: intent=%s order_no=%s user_id=%s (%.2fs)",
-                intent, order_no,state.get("user_id"), time.perf_counter() - start)
+    logger.info(">>> 路由节点: intent=%s order_no=%s (%.2fs)",
+                intent, order_no, time.perf_counter() - start)
     return {
         "intent": intent,
         # 合并而不是覆盖：保留之前抽到的槽位（如商品名），

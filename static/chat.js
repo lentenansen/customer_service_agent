@@ -14,8 +14,6 @@ const tabRegister = document.getElementById("tab-register");
 const userBar = document.getElementById("user-bar");
 const userName = document.getElementById("user-name");
 const logoutBtn = document.getElementById("logout-btn");
-// 说明：「测试购买」的跳转直接写在 index.html 的 onclick 上，这里不再绑定。
-// 原因：该入口必须在本脚本被缓存成旧版或加载失败时依然可用。
 
 // 登录态存在浏览器本地：token 用于请求，username 用于显示
 let token = localStorage.getItem("cs_token") || "";
