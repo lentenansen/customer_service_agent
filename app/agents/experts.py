@@ -20,7 +20,8 @@ from app.agents.prompts import (
     ORDER_SYSTEM,
 )
 from app.llm import get_chat_model
-from app.state import AgentState
+from app.state import AgentContext, AgentState
+from app.store import get_bound_mysql_user_id
 from app.tools import (
     query_after_sale_by_no,
     query_logistics_by_no,
@@ -32,12 +33,17 @@ from app.tools import (
 logger = logging.getLogger("customer-service")
 
 
+# 声明运行时上下文的结构：工具靠它从 runtime.context 里取值
+# 定义放在 app/state.py——放这里会被 tools.py 反向 import，形成循环依赖
+
+
 def _build_agent(tools: list, system_prompt: str):
     """每个专家共用一个模型实例，但工具集和提示词不同。"""
     return create_agent(
         model=get_chat_model(),
         tools=tools,
         system_prompt=system_prompt,
+        context_schema=AgentContext     # type: ignore[arg-type]
     )
 
 
@@ -59,13 +65,29 @@ KNOWLEDGE_AGENT = _build_agent(
 )
 
 
+def _agent_context(state: AgentState) -> AgentContext:
+    """把图状态里的 Redis uuid 换成 MySQL 自增 id，作为子 Agent 的运行时上下文。
+
+    工具靠 runtime.context["user_id"] 做订单归属过滤。
+    匿名用户（没有 uuid）→ None，工具查不到任何订单（当前策略：匿名不做归属校验，
+    但也没有订单归属，后续按 05 的待决策点再定）。
+    """
+    redis_uuid = state.get("user_id")
+    mysql_uid = get_bound_mysql_user_id(redis_uuid) if redis_uuid else None
+    return {"user_id": mysql_uid}
+
+
 async def _run_agent_node(agent, state: AgentState, node_name: str) -> dict:
     """公共封装：跑 Agent、记日志、产出 answer 和追加的最终消息。"""
     start = time.perf_counter()
     logger.info(">>> 进入节点: %s", node_name)
+    run_config = {
+        "recursion_limit": 15,
+    }
     result = await agent.ainvoke(
         {"messages": state["messages"]},
-        config={"recursion_limit": 15},
+        config=run_config,
+        context=_agent_context(state),
     )
     final_message = result["messages"][-1]
     elapsed = time.perf_counter() - start
@@ -127,9 +149,11 @@ async def after_sale_agent_node(state: AgentState) -> dict:
     """
     start = time.perf_counter()
     logger.info(">>> 进入节点: 售后专家")
+
     result = await AFTER_SALE_AGENT.ainvoke(
         {"messages": state["messages"]},
         config={"recursion_limit": 15},
+        context=_agent_context(state),
     )
     elapsed = time.perf_counter() - start
 
