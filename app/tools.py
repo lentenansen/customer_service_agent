@@ -7,13 +7,16 @@
 """
 import logging
 import time
+from typing import Annotated
 
 from langchain_core.tools import tool
+from langgraph.prebuilt import ToolRuntime
 
 from app import config
 from app.db import SessionLocal
 from app import metrics
 from app.models import AfterSale, LogisticsEvent, Order, OrderItem
+from app.state import AgentContext
 from app.store import new_ticket_id
 
 logger = logging.getLogger("customer-service")
@@ -31,11 +34,21 @@ def _log_tool_call(name: str, params: str, result: str, elapsed: float) -> None:
     metrics.record_tool(name)
 
 
-def _query_order_rows(order_no: str):
-    """内部公共查询：订单 + 商品明细。查不到返回 None。"""
+def _query_order_rows(order_no: str, user_id: int | None):
+    """内部公共查询：订单 + 商品明细，并按归属校验。
+
+    注意：这是普通内部函数，不是 @tool，所以 user_id 必须由调用方
+    显式传入（不能用 InjectedToolArg，注入只对 @tool 生效）。
+    订单不存在、或不属于当前用户，统一返回 None（不区分，防探测）。
+    """
     db = SessionLocal()
     try:
-        order = db.query(Order).filter(Order.order_no == order_no).first()
+        order = (
+            db.query(Order)
+            .filter(Order.order_no == order_no)
+            .filter(Order.user_id == user_id)
+            .first()
+        )
         if order is None:
             return None
         items = (
@@ -49,10 +62,13 @@ def _query_order_rows(order_no: str):
 
 
 @tool
-def query_order_by_no(order_no: str) -> str:
+def query_order_by_no(order_no: str, runtime : ToolRuntime[AgentContext]) -> str:
     """查询订单信息：输入完整订单号，返回订单状态、下单时间、金额和商品清单。"""
     start = time.perf_counter()
-    result = _query_order_rows(order_no)
+    user_id = (runtime.context or {}).get("user_id")
+
+    logger.info(f">>> 使用工具：query_order_by_no --- order_no={order_no} --- user_id={user_id}")
+    result = _query_order_rows(order_no, user_id)
     if result is None:
         text = f"未找到订单 {order_no}，请核实订单号后重试"
     else:
@@ -74,11 +90,23 @@ def query_order_by_no(order_no: str) -> str:
 
 
 @tool
-def query_logistics_by_no(order_no: str) -> str:
+def query_logistics_by_no(order_no: str, runtime : ToolRuntime[AgentContext]) -> str:
     """查询物流轨迹：输入完整订单号，返回该订单每一段物流更新。"""
     start = time.perf_counter()
+    user_id = (runtime.context or {}).get("user_id")
+    logger.info(f">>> 使用工具：query_logistics_by_no --- order_no={order_no} --- user_id={user_id}")
     db = SessionLocal()
     try:
+        # 订单归属校验
+        order = (
+            db.query(Order)
+            .filter(Order.order_no == order_no)
+            .filter(Order.user_id == user_id)
+            .first()
+        )
+        if order is None:
+            return f"未找到订单 {order_no}，请核实订单号后重试"
+
         events = (
             db.query(LogisticsEvent)
             .filter(LogisticsEvent.order_no == order_no)
@@ -88,9 +116,7 @@ def query_logistics_by_no(order_no: str) -> str:
     finally:
         db.close()
 
-    if _query_order_rows(order_no) is None:
-        text = f"未找到订单 {order_no}，请核实订单号后重试"
-    elif not events:
+    if not events:
         text = f"订单 {order_no} 暂无物流轨迹（可能尚未发货）"
     else:
         lines = [f"{e.event_at:%m-%d %H:%M} {e.description}" for e in events]
@@ -101,14 +127,17 @@ def query_logistics_by_no(order_no: str) -> str:
 
 
 @tool
-def query_after_sale_by_no(order_no: str) -> str:
+def query_after_sale_by_no(order_no: str, runtime : ToolRuntime[AgentContext]) -> str:
     """查询售后单进度：输入完整订单号，返回退货/退款/换货申请的状态。"""
     start = time.perf_counter()
+    user_id = (runtime.context or {}).get("user_id")
+    logger.info(f">>> 使用工具：query_after_sale_by_no --- order_no={order_no} --- user_id={user_id}")
     db = SessionLocal()
     try:
         records = (
             db.query(AfterSale)
             .filter(AfterSale.order_no == order_no)
+            .filter(AfterSale.user_id == user_id)
             .order_by(AfterSale.created_at.desc())
             .all()
         )
@@ -116,7 +145,7 @@ def query_after_sale_by_no(order_no: str) -> str:
         db.close()
 
     if not records:
-        text = f"订单 {order_no} 没有售后申请记录"
+        text = f"未找到订单 {order_no}，请核实订单号后重试"
     else:
         lines = []
         for r in records:
